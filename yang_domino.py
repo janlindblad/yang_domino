@@ -10,7 +10,7 @@ def _strip_version(filename):
     return filename
   return filename.split('@')[0]
 
-def scan_yanger(files_to_scan, path="."):
+def scan_yanger(files_to_scan, path=".", debug=False):
   dependency_map = {}
   incompletely_scanned = set()
   for file in files_to_scan:
@@ -34,15 +34,26 @@ def scan_yanger(files_to_scan, path="."):
       # ./ietf-network-topology.yang:11: error: module 'ietf-network' not found
       # ./ietf-packet-fields.yang:18: error: module 'ietf-ethertypes' not found
       piece = line.split(":")
+      if debug: print(f"XX yanger output line '{line}'")
       if len(piece) < 4 or piece[2] != " error":
         #print(f"## Skipping oddly formatted line '{line}'")
         continue
-      name = _strip_version(os.path.splitext(os.path.basename(piece[0]))[0])
-      missing_mod = [piece[3].split("'")[1]]
-      dependency_map[name] = dependency_map.get(name,[]) + missing_mod
-      #print(f"## Acting on '{line}' => missing mod {missing_mod}")
-      incompletely_scanned.add(file) # Import statements not read, since there was an error
-      #print(f'YE {name} {missing_mod} {dependency_map}')
+      try:
+        name = missing_mod = None
+        name = _strip_version(os.path.splitext(os.path.basename(piece[0]))[0])
+        if "'" not in piece[3]:
+          continue
+        message = piece[3].split("'")
+        if message[0] != ' module ' or message[2] != ' not found':
+          continue
+        missing_mod = [message[1]]
+        if debug: print(f"XX missing module '{message[1]}'")
+        dependency_map[name] = dependency_map.get(name,[]) + missing_mod
+        #print(f"## Acting on '{line}' => missing mod {missing_mod}")
+        incompletely_scanned.add(file) # Import statements not read, since there was an error
+        #print(f'YE {name} {missing_mod} {dependency_map}')
+      except Exception as ex:
+        print(f'## {name} {missing_mod} {piece} {ex}')
   return (incompletely_scanned, dependency_map)
 
 def scan_grep(files_to_scan):
@@ -169,12 +180,15 @@ def main():
 
   files_to_scan = set(args)
 
+  if not pathlib.Path(extra_dir).is_dir():
+    pathlib.Path(extra_dir).mkdir(parents=True)
+
   while files_to_scan:
     if debug: print(f'\n\nXX Files to scan: {files_to_scan}')
     if use_grep:
       (incomplete, dependency_map) = scan_grep(files_to_scan)
     else:
-      (incomplete, dependency_map) = scan_yanger(files_to_scan, path=module_dirs)
+      (incomplete, dependency_map) = scan_yanger(files_to_scan, path=module_dirs, debug=debug)
     if debug: print(f'XX Dependency map: {dependency_map}')
 
     if remove_file_names:
@@ -252,10 +266,11 @@ def main():
             print(f'{imported_module} : Copied {found_map[imported_module]} to {dest_file}')
           except Exception as ex:
             print(f'{imported_module} : Unable to copy {found_map[imported_module]} to {pathlib.Path(extra_dir, found_map[imported_module].name)} : {ex}')
+            files_to_scan = None
         else:
           print(f'{imported_module} : Unable to find module in any of the specified library directories')
+          files_to_scan = None
       if debug: print(f'XX Library dirs done')
-
 
 if __name__ == '__main__':
   main()
